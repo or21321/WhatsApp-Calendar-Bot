@@ -3,6 +3,7 @@ from flask_migrate import Migrate
 from app.models.user import db, User, MessageHistory
 from app.config import Config
 from app.services.google_calendar import GoogleCalendarService
+from app.services.whatsapp_service import WhatsAppService
 from datetime import datetime
 import os
 import json
@@ -15,140 +16,85 @@ def create_app():
     db.init_app(app)
     migrate = Migrate(app, db)
 
-    @app.route('/debug/timezone/<path:phone_number>')
-    def debug_timezone(phone_number):
-        """Debug timezone handling"""
-        phone_number = phone_number.replace('%2B', '+')
-
-        user = User.query.filter_by(whatsapp_number=phone_number).first()
-
-        if not user:
-            return f"User {phone_number} not found"
-
-        from datetime import datetime
-        import pytz
-
-        # Test timezone conversion
-        utc_now = datetime.now(pytz.UTC)
-        user_tz = pytz.timezone(user.timezone)
-        local_now = utc_now.astimezone(user_tz)
-
-        debug_info = {
-            'user_timezone': user.timezone,
-            'utc_time': utc_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
-            'local_time': local_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
-            'timezone_offset': local_now.strftime('%z')
+    @app.route('/debug/token')
+    def debug_token():
+        """Debug token loading"""
+        token = os.getenv('WHATSAPP_ACCESS_TOKEN')
+        return {
+            'token_present': bool(token),
+            'token_length': len(token) if token else 0,
+            'token_starts_with': token[:10] if token else None,
+            'token_ends_with': token[-10:] if token else None
         }
-
-        return f"<pre>{json.dumps(debug_info, indent=2)}</pre>"
-
-
-    @app.route('/debug/calendar/<path:phone_number>')
-    def debug_calendar(phone_number):
-        """Debug calendar integration"""
-        phone_number = phone_number.replace('%2B', '+')
-
-        user = User.query.filter_by(whatsapp_number=phone_number).first()
-
-        if not user or not user.google_access_token:
-            return f"User {phone_number} not found or not connected to Google Calendar"
-
-        try:
-            calendar_service = GoogleCalendarService()
-            service, updated_credentials = calendar_service.build_service(user.get_credentials())
-
-            # Get calendar list
-            calendar_list = service.calendarList().list().execute()
-            calendars = calendar_list.get('items', [])
-
-            # Get today's events with more details
-            from datetime import datetime
-            import pytz
-
-            now = datetime.now(pytz.UTC)
-            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-            events_result = service.events().list(
-                calendarId='primary',
-                timeMin=start_of_day.isoformat(),
-                timeMax=end_of_day.isoformat(),
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
-
-            events = events_result.get('items', [])
-
-            debug_info = {
-                'user_timezone': user.timezone,
-                'calendars_count': len(calendars),
-                'calendars': [{'id': cal.get('id'), 'name': cal.get('summary')} for cal in calendars],
-                'events_count': len(events),
-                'events': events[:3] if events else [],  # First 3 events
-                'search_range': {
-                    'start': start_of_day.isoformat(),
-                    'end': end_of_day.isoformat()
-                }
-            }
-
-            return f"<pre>{json.dumps(debug_info, indent=2, default=str)}</pre>"
-
-        except Exception as e:
-            return f"Error: {str(e)}"
 
     @app.route('/')
     def index():
         return "WhatsApp Calendar Bot is running!"
 
-    @app.route('/webhook', methods=['POST'])
+    @app.route('/test')
+    def test_route():
+        return "Hello from Flask!"
+
+    @app.route('/webhook', methods=['GET', 'POST'])
     def webhook():
-        """Handle incoming WhatsApp messages"""
-        try:
-            data = request.json
-            print(f"Received webhook data: {data}")
+        """Handle WhatsApp webhook - verification and incoming messages"""
 
-            if data and 'messages' in data:
-                for message in data['messages']:
-                    phone_number = message.get('from')
-                    message_text = message.get('text', {}).get('body', '').strip().lower()
+        if request.method == 'GET':
+            # Webhook verification
+            verify_token = request.args.get('hub.verify_token')
+            challenge = request.args.get('hub.challenge')
 
-                    print(f"Message from {phone_number}: {message_text}")
+            print(f"Webhook verification - Token: {verify_token}, Challenge: {challenge}")
 
-                    # Handle calendar commands
-                    if message_text == 'today':
-                        response = handle_today_command(phone_number)
-                    elif message_text == 'upcoming':
-                        response = handle_upcoming_command(phone_number)
-                    elif message_text == 'connect':
-                        response = handle_connect_command(phone_number)
-                    elif message_text == 'hello':
-                        response = "Hello! I'm your WhatsApp Calendar Bot. Type 'help' for commands."
-                    elif message_text == 'help':
-                        response = """📅 *Calendar Bot Commands*
+            if verify_token == 'my_secret_verify_token_123':
+                print("Webhook verified successfully!")
+                return challenge
+            else:
+                print("Invalid verify token!")
+                return 'Invalid verify token', 403
 
-• *connect* - Link your Google Calendar
-• *today* - Get today's events
-• *upcoming* - Get this week's events
-• *status* - Check connection status
-• *help* - Show this message
+        elif request.method == 'POST':
+            # Handle incoming messages
+            try:
+                data = request.json
+                print(f"Received webhook data: {json.dumps(data, indent=2)}")
 
-First, send *connect* to link your calendar!"""
-                    elif message_text == 'status':
-                        response = check_user_status(phone_number)
-                    else:
-                        response = f"Unknown command: {message_text}\nType 'help' for available commands."
+                # WhatsApp Business API format
+                if 'entry' in data:
+                    for entry in data['entry']:
+                        if 'changes' in entry:
+                            for change in entry['changes']:
+                                if change.get('field') == 'messages':
+                                    messages = change.get('value', {}).get('messages', [])
 
-                    print(f"Sending response: {response}")
+                                    for message in messages:
+                                        phone_number = message.get('from')
 
-            return jsonify({'status': 'success'})
+                                        if message.get('type') == 'text':
+                                            message_text = message.get('text', {}).get('body', '').strip().lower()
 
-        except Exception as e:
-            print(f"Webhook error: {e}")
-            return jsonify({'status': 'error', 'message': str(e)})
+                                            print(f"Processing message from {phone_number}: {message_text}")
 
-    @app.route('/auth/login/<phone_number>')
+                                            # Process the message
+                                            response_text = process_message(phone_number, message_text)
+
+                                            # Send response
+                                            whatsapp_service = WhatsAppService()
+                                            success = whatsapp_service.send_message(phone_number, response_text)
+
+                                            print(f"Response sent: {success}")
+
+                return jsonify({'status': 'success'})
+
+            except Exception as e:
+                print(f"Webhook error: {e}")
+                return jsonify({'status': 'error', 'message': str(e)})
+
+    @app.route('/auth/login/<path:phone_number>')
     def auth_login(phone_number):
         """Initiate Google OAuth flow for a WhatsApp user"""
+        phone_number = phone_number.replace('%2B', '+')
+
         calendar_service = GoogleCalendarService()
         auth_url, state = calendar_service.get_authorization_url(state=phone_number)
 
@@ -184,7 +130,7 @@ First, send *connect* to link your calendar!"""
             user.google_access_token = tokens['access_token']
             user.google_refresh_token = tokens['refresh_token']
             user.token_expiry = tokens['token_expiry']
-            user.timezone = 'Asia/Jerusalem'  # ← Add this line
+            user.timezone = 'Asia/Jerusalem'
             db.session.commit()
 
             return f"""
@@ -203,16 +149,18 @@ First, send *connect* to link your calendar!"""
             print(f"OAuth callback error: {e}")
             return f"Authorization failed: {str(e)}", 400
 
-    @app.route('/test/calendar/<phone_number>')
+    @app.route('/test/calendar/<path:phone_number>')
     def test_calendar(phone_number):
         """Test calendar integration for a user"""
+        phone_number = phone_number.replace('%2B', '+')
+
         user = User.query.filter_by(whatsapp_number=phone_number).first()
 
         if not user or not user.google_access_token:
             return f"User {phone_number} not found or not connected to Google Calendar"
 
         calendar_service = GoogleCalendarService()
-        events, updated_credentials = calendar_service.get_today_events(user.get_credentials())
+        events, updated_credentials = calendar_service.get_today_events(user.get_credentials(), user.timezone)
 
         if updated_credentials:
             # Update tokens if they were refreshed
@@ -225,11 +173,57 @@ First, send *connect* to link your calendar!"""
 
         return f"<pre>{formatted_message}</pre>"
 
+    @app.route('/test/send-message/<path:phone_number>')
+    def test_send_message(phone_number):
+        """Test sending a WhatsApp message"""
+        phone_number = phone_number.replace('%2B', '+')
+
+        whatsapp_service = WhatsAppService()
+        success = whatsapp_service.test_send_message(phone_number)
+
+        if success:
+            return f"✅ Test message sent to {phone_number}!"
+        else:
+            return f"❌ Failed to send message to {phone_number}"
+
     return app
+
+def process_message(phone_number, message_text):
+    """Process incoming message and return response"""
+    print(f"Processing: {message_text} from {phone_number}")
+
+    if message_text == 'today':
+        return handle_today_command(phone_number)
+    elif message_text == 'upcoming':
+        return handle_upcoming_command(phone_number)
+    elif message_text == 'connect':
+        return handle_connect_command(phone_number)
+    elif message_text == 'status':
+        return check_user_status(phone_number)
+    elif message_text == 'hello':
+        return "Hello! I'm your WhatsApp Calendar Bot. Type 'help' for commands."
+    elif message_text == 'help':
+        return """📅 *Calendar Bot Commands*
+
+• *connect* - Link your Google Calendar
+• *today* - Get today's events
+• *upcoming* - Get this week's events
+• *status* - Check connection status
+• *help* - Show this message
+
+First, send *connect* to link your calendar!"""
+    else:
+        return f"Unknown command: '{message_text}'\nType 'help' for available commands."
+
+def get_base_url():
+    """Get the base URL (ngrok or localhost)"""
+    # You can set this as an environment variable
+    return os.getenv('BASE_URL', 'http://localhost:5000')
 
 def handle_connect_command(phone_number):
     """Handle connect command"""
-    auth_url = f"http://localhost:5000/auth/login/{phone_number}"
+    base_url = get_base_url()
+    auth_url = f"{base_url}/auth/login/{phone_number}"
     return f"""🔗 *Connect Your Google Calendar*
 
 Click this link to authorize calendar access:
