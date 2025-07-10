@@ -15,6 +15,87 @@ def create_app():
     db.init_app(app)
     migrate = Migrate(app, db)
 
+    @app.route('/debug/timezone/<path:phone_number>')
+    def debug_timezone(phone_number):
+        """Debug timezone handling"""
+        phone_number = phone_number.replace('%2B', '+')
+
+        user = User.query.filter_by(whatsapp_number=phone_number).first()
+
+        if not user:
+            return f"User {phone_number} not found"
+
+        from datetime import datetime
+        import pytz
+
+        # Test timezone conversion
+        utc_now = datetime.now(pytz.UTC)
+        user_tz = pytz.timezone(user.timezone)
+        local_now = utc_now.astimezone(user_tz)
+
+        debug_info = {
+            'user_timezone': user.timezone,
+            'utc_time': utc_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'local_time': local_now.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'timezone_offset': local_now.strftime('%z')
+        }
+
+        return f"<pre>{json.dumps(debug_info, indent=2)}</pre>"
+
+
+    @app.route('/debug/calendar/<path:phone_number>')
+    def debug_calendar(phone_number):
+        """Debug calendar integration"""
+        phone_number = phone_number.replace('%2B', '+')
+
+        user = User.query.filter_by(whatsapp_number=phone_number).first()
+
+        if not user or not user.google_access_token:
+            return f"User {phone_number} not found or not connected to Google Calendar"
+
+        try:
+            calendar_service = GoogleCalendarService()
+            service, updated_credentials = calendar_service.build_service(user.get_credentials())
+
+            # Get calendar list
+            calendar_list = service.calendarList().list().execute()
+            calendars = calendar_list.get('items', [])
+
+            # Get today's events with more details
+            from datetime import datetime
+            import pytz
+
+            now = datetime.now(pytz.UTC)
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+            events_result = service.events().list(
+                calendarId='primary',
+                timeMin=start_of_day.isoformat(),
+                timeMax=end_of_day.isoformat(),
+                singleEvents=True,
+                orderBy='startTime'
+            ).execute()
+
+            events = events_result.get('items', [])
+
+            debug_info = {
+                'user_timezone': user.timezone,
+                'calendars_count': len(calendars),
+                'calendars': [{'id': cal.get('id'), 'name': cal.get('summary')} for cal in calendars],
+                'events_count': len(events),
+                'events': events[:3] if events else [],  # First 3 events
+                'search_range': {
+                    'start': start_of_day.isoformat(),
+                    'end': end_of_day.isoformat()
+                }
+            }
+
+            return f"<pre>{json.dumps(debug_info, indent=2, default=str)}</pre>"
+
+        except Exception as e:
+            return f"Error: {str(e)}"
+
     @app.route('/')
     def index():
         return "WhatsApp Calendar Bot is running!"
@@ -103,6 +184,7 @@ First, send *connect* to link your calendar!"""
             user.google_access_token = tokens['access_token']
             user.google_refresh_token = tokens['refresh_token']
             user.token_expiry = tokens['token_expiry']
+            user.timezone = 'Asia/Jerusalem'  # ← Add this line
             db.session.commit()
 
             return f"""
@@ -110,6 +192,7 @@ First, send *connect* to link your calendar!"""
             <body>
                 <h1>✅ Calendar Connected Successfully!</h1>
                 <p>Your WhatsApp number <strong>{phone_number}</strong> is now connected to Google Calendar.</p>
+                <p>Timezone set to: <strong>Asia/Jerusalem</strong></p>
                 <p>You can now use calendar commands in WhatsApp!</p>
                 <p>Try sending: <strong>today</strong> or <strong>upcoming</strong></p>
             </body>

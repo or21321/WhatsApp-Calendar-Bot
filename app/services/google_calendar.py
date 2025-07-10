@@ -81,12 +81,29 @@ class GoogleCalendarService:
         service = build('calendar', 'v3', credentials=credentials)
         return service, credentials
 
-    def get_today_events(self, credentials_dict, timezone='UTC'):
-        """Get today's events from Google Calendar"""
+    def get_all_calendars(self, credentials_dict):
+        """Get list of all user's calendars"""
         try:
             service, updated_credentials = self.build_service(credentials_dict)
 
-            # Get today's date range
+            calendar_list = service.calendarList().list().execute()
+            calendars = calendar_list.get('items', [])
+
+            return calendars, updated_credentials
+        except Exception as e:
+            print(f"Error fetching calendars: {e}")
+            return [], None
+
+    def get_today_events(self, credentials_dict, timezone='UTC'):
+        """Get today's events from ALL Google Calendars"""
+        try:
+            service, updated_credentials = self.build_service(credentials_dict)
+
+            # Get all calendars
+            calendar_list = service.calendarList().list().execute()
+            calendars = calendar_list.get('items', [])
+
+            # Get today's date range in user's timezone
             user_timezone = pytz.timezone(timezone)
             now = datetime.now(user_timezone)
             start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -96,32 +113,71 @@ class GoogleCalendarService:
             start_time = start_of_day.astimezone(pytz.UTC).isoformat()
             end_time = end_of_day.astimezone(pytz.UTC).isoformat()
 
-            # Call Google Calendar API
-            events_result = service.events().list(
-                calendarId='primary',
-                timeMin=start_time,
-                timeMax=end_time,
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
+            print(f"DEBUG: User timezone: {timezone}")
+            print(f"DEBUG: Local time range: {start_of_day} to {end_of_day}")
+            print(f"DEBUG: UTC time range: {start_time} to {end_time}")
 
-            events = events_result.get('items', [])
+            all_events = []
+
+            # Get events from each calendar
+            for calendar in calendars:
+                calendar_id = calendar['id']
+                calendar_name = calendar.get('summary', calendar_id)
+
+                # Skip calendars that are hidden or not selected
+                if not calendar.get('selected', True):
+                    continue
+
+                try:
+                    events_result = service.events().list(
+                        calendarId=calendar_id,
+                        timeMin=start_time,
+                        timeMax=end_time,
+                        singleEvents=True,
+                        orderBy='startTime'
+                    ).execute()
+
+                    events = events_result.get('items', [])
+
+                    # Add calendar name to each event
+                    for event in events:
+                        event['calendar_name'] = calendar_name
+                        all_events.append(event)
+
+                except Exception as e:
+                    print(f"Error fetching events from calendar {calendar_name}: {e}")
+                    continue
+
+            # Sort all events by start time
+            all_events.sort(key=lambda x: x.get('start', {}).get('dateTime', x.get('start', {}).get('date', '')))
 
             # Format events for WhatsApp
             formatted_events = []
-            for event in events:
+            for event in all_events:
                 start = event.get('start', {})
                 end = event.get('end', {})
 
                 # Handle different event types (all-day vs timed)
                 if 'dateTime' in start:
-                    # Timed event
-                    start_dt = datetime.fromisoformat(start['dateTime'].replace('Z', '+00:00'))
-                    end_dt = datetime.fromisoformat(end['dateTime'].replace('Z', '+00:00'))
+                    # Timed event - handle timezone properly
+                    start_dt_str = start['dateTime']
+                    end_dt_str = end['dateTime']
 
-                    # Convert to user timezone
-                    start_local = start_dt.astimezone(user_timezone)
-                    end_local = end_dt.astimezone(user_timezone)
+                    # Parse datetime with timezone info
+                    if start_dt_str.endswith('Z'):
+                        # UTC time - convert to user timezone
+                        start_dt = datetime.fromisoformat(start_dt_str.replace('Z', '+00:00'))
+                        end_dt = datetime.fromisoformat(end_dt_str.replace('Z', '+00:00'))
+                        start_local = start_dt.astimezone(user_timezone)
+                        end_local = end_dt.astimezone(user_timezone)
+                    else:
+                        # Already has timezone info - use as is
+                        start_dt = datetime.fromisoformat(start_dt_str)
+                        end_dt = datetime.fromisoformat(end_dt_str)
+                        start_local = start_dt
+                        end_local = end_dt
+
+                    print(f"DEBUG: Event '{event.get('summary')}' - Original: {start_dt_str} -> Final: {start_local}")
 
                     time_str = f"{start_local.strftime('%I:%M %p')} - {end_local.strftime('%I:%M %p')}"
                 else:
@@ -132,7 +188,8 @@ class GoogleCalendarService:
                     'title': event.get('summary', 'No title'),
                     'time': time_str,
                     'location': event.get('location', ''),
-                    'description': event.get('description', '')
+                    'description': event.get('description', ''),
+                    'calendar': event.get('calendar_name', 'Unknown')
                 })
 
             return formatted_events, updated_credentials
@@ -142,9 +199,13 @@ class GoogleCalendarService:
             return [], None
 
     def get_upcoming_events(self, credentials_dict, days=7, timezone='UTC'):
-        """Get upcoming events for the next N days"""
+        """Get upcoming events for the next N days from ALL calendars"""
         try:
             service, updated_credentials = self.build_service(credentials_dict)
+
+            # Get all calendars
+            calendar_list = service.calendarList().list().execute()
+            calendars = calendar_list.get('items', [])
 
             # Get date range
             user_timezone = pytz.timezone(timezone)
@@ -155,20 +216,43 @@ class GoogleCalendarService:
             start_time = now.astimezone(pytz.UTC).isoformat()
             end_time = end_date.astimezone(pytz.UTC).isoformat()
 
-            # Call Google Calendar API
-            events_result = service.events().list(
-                calendarId='primary',
-                timeMin=start_time,
-                timeMax=end_time,
-                singleEvents=True,
-                orderBy='startTime'
-            ).execute()
+            all_events = []
 
-            events = events_result.get('items', [])
+            # Get events from each calendar
+            for calendar in calendars:
+                calendar_id = calendar['id']
+                calendar_name = calendar.get('summary', calendar_id)
+
+                # Skip calendars that are hidden or not selected
+                if not calendar.get('selected', True):
+                    continue
+
+                try:
+                    events_result = service.events().list(
+                        calendarId=calendar_id,
+                        timeMin=start_time,
+                        timeMax=end_time,
+                        singleEvents=True,
+                        orderBy='startTime'
+                    ).execute()
+
+                    events = events_result.get('items', [])
+
+                    # Add calendar name to each event
+                    for event in events:
+                        event['calendar_name'] = calendar_name
+                        all_events.append(event)
+
+                except Exception as e:
+                    print(f"Error fetching events from calendar {calendar_name}: {e}")
+                    continue
+
+            # Sort all events by start time
+            all_events.sort(key=lambda x: x.get('start', {}).get('dateTime', x.get('start', {}).get('date', '')))
 
             # Group events by date
             events_by_date = {}
-            for event in events:
+            for event in all_events:
                 start = event.get('start', {})
 
                 if 'dateTime' in start:
@@ -189,7 +273,8 @@ class GoogleCalendarService:
                     'title': event.get('summary', 'No title'),
                     'time': time_str,
                     'location': event.get('location', ''),
-                    'description': event.get('description', '')
+                    'description': event.get('description', ''),
+                    'calendar': event.get('calendar_name', 'Unknown')
                 })
 
             return events_by_date, updated_credentials
@@ -208,6 +293,7 @@ class GoogleCalendarService:
         for i, event in enumerate(events, 1):
             message += f"{i}. *{event['title']}*\n"
             message += f"   🕐 {event['time']}\n"
+            message += f"   📂 {event['calendar']}\n"
 
             if event['location']:
                 message += f"   📍 {event['location']}\n"
@@ -237,6 +323,7 @@ class GoogleCalendarService:
 
             for event in events:
                 message += f"  • {event['title']} - {event['time']}\n"
+                message += f"    📂 {event['calendar']}\n"
                 if event['location']:
                     message += f"    📍 {event['location']}\n"
 
