@@ -9,7 +9,11 @@ from app.config import Config
 
 class GoogleCalendarService:
     def __init__(self):
-        self.SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+        # Updated scopes to include event creation
+        self.SCOPES = [
+            'https://www.googleapis.com/auth/calendar.readonly',
+            'https://www.googleapis.com/auth/calendar.events'  # Add this for event creation
+        ]
         self.client_id = Config.GOOGLE_CLIENT_ID
         self.client_secret = Config.GOOGLE_CLIENT_SECRET
         self.redirect_uri = Config.GOOGLE_REDIRECT_URI
@@ -71,7 +75,8 @@ class GoogleCalendarService:
             refresh_token=credentials_dict['refresh_token'],
             token_uri='https://oauth2.googleapis.com/token',
             client_id=self.client_id,
-            client_secret=self.client_secret
+            client_secret=self.client_secret,
+            scopes=self.SCOPES  # Add this line
         )
 
         # Refresh token if needed
@@ -80,6 +85,33 @@ class GoogleCalendarService:
 
         service = build('calendar', 'v3', credentials=credentials)
         return service, credentials
+
+    def get_user_calendars(self, credentials_dict):
+        """Get list of user's calendars with write access"""
+        try:
+            service, updated_credentials = self.build_service(credentials_dict)
+
+            calendar_list = service.calendarList().list().execute()
+            calendars = calendar_list.get('items', [])
+
+            # Filter calendars with write access
+            writable_calendars = []
+            for calendar in calendars:
+                access_role = calendar.get('accessRole', 'reader')
+                if access_role in ['owner', 'writer'] and calendar.get('selected', True):
+                    writable_calendars.append({
+                        'id': calendar['id'],
+                        'name': calendar.get('summary', calendar['id']),
+                        'primary': calendar.get('primary', False),
+                        'access_role': access_role,
+                        'color': calendar.get('backgroundColor', '#4285f4')
+                    })
+
+            return writable_calendars, updated_credentials
+
+        except Exception as e:
+            print(f"Error fetching calendars: {e}")
+            return [], None
 
     def get_all_calendars(self, credentials_dict):
         """Get list of all user's calendars"""
@@ -165,7 +197,7 @@ class GoogleCalendarService:
 
                     # Parse datetime with timezone info
                     if start_dt_str.endswith('Z'):
-                        # UTC time - convert to user timezone
+                        # UTC time
                         start_dt = datetime.fromisoformat(start_dt_str.replace('Z', '+00:00'))
                         end_dt = datetime.fromisoformat(end_dt_str.replace('Z', '+00:00'))
                         start_local = start_dt.astimezone(user_timezone)
@@ -282,6 +314,44 @@ class GoogleCalendarService:
         except Exception as e:
             print(f"Error fetching upcoming events: {e}")
             return {}, None
+
+    def create_event_in_calendar(self, credentials_dict, event_data, calendar_id='primary', timezone='UTC'):
+        """Create an event in a specific calendar"""
+        try:
+            service, updated_credentials = self.build_service(credentials_dict)
+
+            # Prepare event data for Google Calendar API
+            event = {
+                'summary': event_data['title'],
+                'start': {
+                    'dateTime': event_data['start_time'].isoformat(),
+                    'timeZone': timezone,
+                },
+                'end': {
+                    'dateTime': event_data['end_time'].isoformat(),
+                    'timeZone': timezone,
+                },
+            }
+
+            # Add optional fields
+            if event_data.get('location'):
+                event['location'] = event_data['location']
+
+            if event_data.get('description'):
+                event['description'] = event_data['description']
+
+            # Create the event
+            created_event = service.events().insert(
+                calendarId=calendar_id,
+                body=event
+            ).execute()
+
+            print(f"✅ Event created in calendar {calendar_id}: {created_event.get('id')}")
+            return created_event.get('id'), updated_credentials
+
+        except Exception as e:
+            print(f"❌ Error creating event: {e}")
+            return None, None
 
     def format_events_for_whatsapp(self, events):
         """Format events list for WhatsApp message"""
