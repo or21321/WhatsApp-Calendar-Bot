@@ -12,6 +12,55 @@ import re
 
 # Helper functions BEFORE create_app()
 
+def detect_user_language(user, message_text):
+    """Simple language detection and update user preference"""
+    hebrew_chars = len([c for c in message_text if '\u0590' <= c <= '\u05FF'])
+
+    if hebrew_chars > 0:
+        user.language = 'he'
+    else:
+        user.language = 'en'
+
+    db.session.commit()
+    return user.language
+
+def get_message_in_language(language, key, **kwargs):
+    """Get message template in specified language"""
+    messages = {
+        'en': {
+            'welcome': "Hello! I'm your smart WhatsApp Calendar Bot. Try saying things like: 'Meeting with John tomorrow at 2pm', 'Doctor appointment Friday 10am', 'today' to see today's events, 'help' for more commands",
+            'help': "🤖 *Smart Calendar Bot Help*\n\n*📝 Create Events Naturally:*\nJust tell me what you want to schedule:\n• \"Meeting with John tomorrow at 2pm\"\n• \"Doctor appointment Friday 10am in clinic\"\n• \"Lunch with Sarah next Monday 12:30pm\"\n\n*📅 View Events:*\n• *today* - Get today's events\n• *upcoming* - Get this week's events\n\n*⚙️ Setup:*\n• *connect* - Link your Google Calendar\n• *status* - Check connection status\n\n*🌍 Language:*\n• *עבור לעברית* - Switch to Hebrew\n\nTry saying \"Meeting with John tomorrow at 2pm\" to see the magic! ✨",
+            'not_connected': "❌ Please connect your Google Calendar first. Send 'connect' to get started.",
+            'connection_success': "✅ Connected to Google Calendar\n📍 Timezone: {timezone}\n📅 Ready to fetch events and create new ones with AI!",
+            'unknown_command': "Unknown command: '{message}'\nType 'help' for available commands.",
+            'nlp_failed': "🤔 I couldn't parse that as an event. Try formats like: 'Meeting with John tomorrow at 2pm', 'Doctor appointment Friday 10am', 'Lunch with Sarah next Monday 12:30pm'. Or use commands like 'today', 'upcoming', or 'help'",
+            'language_switched': "✅ Language switched to English! You can now chat in English.",
+            'cancel_with_conversation': "❌ Cancelled current conversation. You can start fresh anytime!",
+            'cancel_without_conversation': "Nothing to cancel. You can create events by saying something like: 'Meeting with John tomorrow at 2pm'",
+            'connect_prompt': "🔗 *Connect Your Google Calendar*\n\nClick this link to authorize calendar access:\n{auth_url}\n\n*What you'll be asked to allow:*\n📅 Read your calendar events\n➕ Create new events\n🔒 We never delete or modify existing events\n\n*This is safe and secure - you can revoke access anytime in your Google Account settings.*"
+        },
+        'he': {
+            'welcome': "שלום! אני הבוט החכם שלך לניהול יומן בוואטסאפ. נסה לומר דברים כמו: 'פגישה עם יונתן מחר בשעה 14:00', 'תור לרופא יום שישי 10:00', 'היום' כדי לראות את אירועי היום, 'עזרה' לפקודות נוספות",
+            'help': "🤖 *עזרה לבוט יומן חכם*\n\n*📝 יצירת אירועים באופן טבעי:*\nפשוט תגיד לי מה אתה רוצה לתזמן:\n• \"פגישה עם יונתן מחר בשעה 14:00\"\n• \"תור לרופא יום שישי בשעה 10:00 במרפאה\"\n• \"ארוחת צהריים עם שרה יום שני הבא 12:30\"\n\n*📅 צפייה באירועים:*\n• *היום* - קבל את אירועי היום\n• *קרוב* - קבל את אירועי השבוע\n\n*⚙️ הגדרות:*\n• *התחבר* - חבר את יומן הגוגל\n• *סטטוס* - בדוק מצב החיבור\n\n*🌍 שפה:*\n• *switch to english* - עבור לאנגלית\n\nנסה לומר \"פגישה עם יונתן מחר בשעה 14:00\" כדי לראות את הקסם! ✨",
+            'not_connected': "❌ אנא חבר את יומן הגוגל שלך תחילה. שלח 'התחבר' כדי להתחיל.",
+            'connection_success': "✅ מחובר ליומן הגוגל\n📍 אזור זמן: {timezone}\n📅 מוכן לאחזר אירועים וליצור חדשים עם בינה מלאכותית!",
+            'unknown_command': "פקודה לא מוכרת: '{message}'\nכתוב 'עזרה' לפקודות זמינות.",
+            'nlp_failed': "🤔 לא הצלחתי לפרש את זה כאירוע. נסה פורמטים כמו: 'פגישה עם יונתן מחר בשעה 14:00', 'תור לרופא יום שישי 10:00', 'ארוחת צהריים עם שרה יום שני הבא 12:30'. או השתמש בפקודות כמו 'היום', 'קרוב', או 'עזרה'",
+            'language_switched': "✅ השפה הוחלפה לעברית! עכשיו אתה יכול לשוחח בעברית.",
+            'cancel_with_conversation': "❌ השיחה הנוכחית בוטלה. אתה יכול להתחיל מחדש בכל עת!",
+            'cancel_without_conversation': "אין מה לבטל. אתה יכול ליצור אירועים על ידי אמירת משהו כמו: 'פגישה עם יונתן מחר בשעה 14:00'",
+            'connect_prompt': "🔗 *חבר את יומן הגוגל שלך*\n\nלחץ על הקישור הזה כדי לאשר גישה ליומן:\n{auth_url}\n\n*מה תתבקש לאשר:*\n📅 קריאת אירועי היומן שלך\n➕ יצירת אירועים חדשים\n🔒 אנחנו לעולם לא מוחקים או משנים אירועים קיימים\n\n*זה בטוח ומאובטח - אתה יכול לבטל את הגישה בכל עת בהגדרות חשבון הגוגל שלך.*"
+        }
+    }
+
+    lang_messages = messages.get(language, messages['en'])
+    template = lang_messages.get(key, messages['en'].get(key, f"Message '{key}' not found"))
+
+    try:
+        return template.format(**kwargs) if kwargs else template
+    except (KeyError, ValueError):
+        return template
+
 def make_json_serializable(parsed_event):
     """Convert datetime objects to strings for JSON serialization"""
     if not parsed_event:
@@ -71,7 +120,9 @@ def should_try_nlp(message_text):
         'meeting', 'appointment', 'call', 'lunch', 'dinner', 'coffee',
         'schedule', 'book', 'plan', 'create', 'add', 'set up',
         'doctor', 'dentist', 'interview', 'presentation', 'demo',
-        'standup', 'review', 'workout', 'gym', 'party', 'event'
+        'standup', 'review', 'workout', 'gym', 'party', 'event',
+        # Hebrew indicators
+        'פגישה', 'תור', 'פגש', 'ארוחה', 'קפה', 'רופא', 'רופאה'
     ]
 
     if any(indicator in message_lower for indicator in strong_indicators):
@@ -82,13 +133,17 @@ def should_try_nlp(message_text):
         'tomorrow', 'today', 'tonight', 'morning', 'afternoon', 'evening',
         'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
         'next week', 'this week', 'next month', 'next monday', 'this friday',
-        'am', 'pm', 'o\'clock'
+        'am', 'pm', 'o\'clock',
+        # Hebrew indicators
+        'מחר', 'היום', 'בוקר', 'צהריים', 'ערב', 'לילה',
+        'ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת',
+        'בשעה', 'ב'
     ]
 
     # If has time indicator + person/organization names, likely an event
     if any(indicator in message_lower for indicator in time_indicators):
         # Check for person indicators
-        person_indicators = ['with', 'and', 'john', 'sarah', 'mike', 'team', 'client', 'boss']
+        person_indicators = ['with', 'and', 'john', 'sarah', 'mike', 'team', 'client', 'boss', 'עם', 'ו']
         if any(person in message_lower for person in person_indicators):
             return True
 
@@ -102,6 +157,8 @@ def should_try_nlp(message_text):
         r'\d{1,2}:\d{2}\s*(am|pm)',
         r'\d{1,2}\s*(am|pm)',
         r'\d{1,2}-\d{1,2}\s*(am|pm)',
+        r'\d{1,2}:\d{2}',  # 24-hour format
+        r'בשעה\s+\d{1,2}',  # Hebrew time patterns
     ]
 
     for pattern in time_patterns:
@@ -110,6 +167,30 @@ def should_try_nlp(message_text):
 
     # Default: don't try NLP
     return False
+
+def format_event_time(parsed_event, language='en'):
+    """Format event time for display"""
+    start_time = parsed_event['start_time']
+    end_time = parsed_event['end_time']
+
+    if isinstance(start_time, str):
+        start_time = datetime.fromisoformat(start_time)
+    if isinstance(end_time, str):
+        end_time = datetime.fromisoformat(end_time)
+
+    if language == 'he':
+        # Hebrew formatting
+        days_he = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת']
+        months_he = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+                     'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר']
+
+        day_name = days_he[start_time.weekday()]
+        month_name = months_he[start_time.month - 1]
+
+        return f"יום {day_name}, {start_time.day} ב{month_name} {start_time.year} בשעה {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}"
+    else:
+        # English formatting
+        return f"{start_time.strftime('%A, %B %d, %Y')} at {start_time.strftime('%I:%M %p')} - {end_time.strftime('%I:%M %p')}"
 
 def handle_conversation_flow(user, message_text):
     """Handle multi-turn conversations (confirmations, clarifications)"""
@@ -138,7 +219,7 @@ def handle_event_confirmation(user, message_text, conversation_data):
     """Handle yes/no confirmation for event creation"""
     message_lower = message_text.lower().strip()
 
-    if message_lower in ['yes', 'y', 'confirm', 'create', 'ok', 'okay']:
+    if message_lower in ['yes', 'y', 'confirm', 'create', 'ok', 'okay', 'כן', 'אישור']:
         # User confirmed - create the event
         serializable_event = conversation_data.get('parsed_event')
         selected_calendar = conversation_data.get('selected_calendar')
@@ -160,7 +241,34 @@ def handle_event_confirmation(user, message_text, conversation_data):
             user.clear_conversation_state()
             return "❌ Error: Event data was lost. Please try creating the event again."
 
-    # ... rest of the function stays the same
+    elif message_lower in ['no', 'n', 'cancel', 'nope', 'לא', 'בטל']:
+        # User cancelled
+        user.clear_conversation_state()
+        if user.language == 'he':
+            return "❌ יצירת האירוע בוטלה. אתה יכול ליצור אירוע חדש בכל עת על ידי אמירת משהו כמו: 'פגישה עם יונתן מחר בשעה 14:00'"
+        else:
+            return "❌ Event creation cancelled. You can create a new event anytime by saying something like: 'Meeting with John tomorrow at 2pm'"
+
+    elif message_lower in ['edit', 'change', 'modify', 'fix', 'עריכה', 'שנה']:
+        # User wants to edit
+        user.set_conversation_state('edit_event', conversation_data)
+        if user.language == 'he':
+            return "✏️ *מה תרצה לשנות?*\n\nאתה יכול לומר:\n• \"שנה שעה ל15:00\"\n• \"שנה תאריך ליום שני\"\n• \"שנה כותרת לפגישת צוות\"\n• \"הוסף מיקום משרד חדר A\"\n• \"בטל\" כדי להתחיל מחדש"
+        else:
+            return "✏️ *What would you like to change?*\n\nYou can say:\n• \"Change time to 3pm\"\n• \"Change date to Monday\"\n• \"Change title to Team Meeting\"\n• \"Add location Office Room A\"\n• \"Cancel\" to start over"
+
+    else:
+        # Invalid response - ask again
+        serializable_event = conversation_data.get('parsed_event')
+        if serializable_event:
+            parsed_event = make_json_deserializable(serializable_event)
+            if user.language == 'he':
+                return f"🤔 אנא השב עם:\n• *כן* כדי ליצור את האירוע\n• *לא* כדי לבטל\n• *עריכה* כדי לשנות\n\nאירוע: *{parsed_event.get('title', 'ללא כותרת')}*\nזמן: {format_event_time(parsed_event, user.language)}"
+            else:
+                return f"🤔 Please reply with:\n• *yes* to create the event\n• *no* to cancel\n• *edit* to make changes\n\nEvent: *{parsed_event.get('title', 'Untitled')}*\nTime: {format_event_time(parsed_event, user.language)}"
+        else:
+            user.clear_conversation_state()
+            return "❌ Something went wrong. Please try creating your event again."
 
 def handle_calendar_selection(user, message_text, conversation_data):
     """Handle calendar selection when user has multiple calendars"""
@@ -187,23 +295,36 @@ def handle_calendar_selection(user, message_text, conversation_data):
             user.clear_conversation_state()
             return result
         else:
-            return f"❌ Please enter a number between 1 and {len(calendars)}"
+            if user.language == 'he':
+                return f"❌ אנא הכנס מספר בין 1 ל{len(calendars)}"
+            else:
+                return f"❌ Please enter a number between 1 and {len(calendars)}"
 
     except ValueError:
         message_lower = message_text.lower().strip()
-        if message_lower in ['cancel', 'back']:
+        if message_lower in ['cancel', 'back', 'בטל', 'חזור']:
             user.clear_conversation_state()
-            return "❌ Calendar selection cancelled."
+            if user.language == 'he':
+                return "❌ בחירת יומן בוטלה."
+            else:
+                return "❌ Calendar selection cancelled."
 
         calendars = conversation_data.get('calendars', [])
         calendar_list = "\n".join([f"{i+1}. {cal['name']}" for i, cal in enumerate(calendars)])
-        return f"❌ Please enter a number to select a calendar:\n\n{calendar_list}"
+
+        if user.language == 'he':
+            return f"❌ אנא הכנס מספר לבחירת יומן:\n\n{calendar_list}"
+        else:
+            return f"❌ Please enter a number to select a calendar:\n\n{calendar_list}"
 
 def handle_event_editing(user, message_text, conversation_data):
     """Handle event editing requests"""
     # This is a simplified version - you could make this much more sophisticated
     user.clear_conversation_state()
-    return "✏️ Event editing is coming soon! For now, please create a new event with the correct details."
+    if user.language == 'he':
+        return "✏️ עריכת אירועים בקרוב! לעת עתה, אנא צור אירוע חדש עם הפרטים הנכונים."
+    else:
+        return "✏️ Event editing is coming soon! For now, please create a new event with the correct details."
 
 def find_matching_calendar(requested_name, calendars):
     """Find calendar that matches the requested name"""
@@ -260,15 +381,24 @@ def show_calendar_not_found(user, parsed_event, requested_name, calendars):
     })
 
     event_title = parsed_event['title']
-    event_time = format_event_time(parsed_event)
+    event_time = format_event_time(parsed_event, user.language)
 
-    message = "❌ *Calendar \"" + requested_name + "\" not found*\n\n"
-    message += "📝 *" + event_title + "*\n"
-    message += "📅 " + event_time + "\n\n"
-    message += "*Available Calendars:*\n"
-    message += calendar_list
-    message += "Reply with the number (1, 2, 3...) to select\n\n"
-    message += "_🔹 = Primary Calendar_"
+    if user.language == 'he':
+        message = f"❌ *יומן \"{requested_name}\" לא נמצא*\n\n"
+        message += f"📝 *{event_title}*\n"
+        message += f"📅 {event_time}\n\n"
+        message += "*יומנים זמינים:*\n"
+        message += calendar_list
+        message += "השב עם המספר (1, 2, 3...) כדי לבחור\n\n"
+        message += "_🔹 = יומן ראשי_"
+    else:
+        message = f"❌ *Calendar \"{requested_name}\" not found*\n\n"
+        message += f"📝 *{event_title}*\n"
+        message += f"📅 {event_time}\n\n"
+        message += "*Available Calendars:*\n"
+        message += calendar_list
+        message += "Reply with the number (1, 2, 3...) to select\n\n"
+        message += "_🔹 = Primary Calendar_"
 
     return message
 
@@ -329,24 +459,6 @@ def try_nlp_event_creation(user, message_text):
         print(f"NLP parsing error: {e}")
         return None
 
-def handle_high_confidence_event(user, parsed_event):
-    """Handle high confidence events - check for multiple calendars"""
-    try:
-        calendar_service = GoogleCalendarService()
-        calendars, _ = calendar_service.get_user_calendars(user.get_credentials())
-        writable_calendars = [cal for cal in calendars if cal['access_role'] in ['owner', 'writer']]
-
-        if len(writable_calendars) <= 1:
-            # Single calendar - create directly
-            return create_event_automatically(user, parsed_event, writable_calendars)
-        else:
-            # Multiple calendars - ask user to choose
-            return ask_calendar_selection(user, parsed_event, writable_calendars)
-
-    except Exception as e:
-        print(f"Error handling high confidence event: {e}")
-        return "❌ Error accessing your calendars. Please try again."
-
 def ask_calendar_selection(user, parsed_event, calendars):
     """Ask user to select calendar for high-confidence event"""
     serializable_event = make_json_serializable(parsed_event)
@@ -362,16 +474,24 @@ def ask_calendar_selection(user, parsed_event, calendars):
         primary_indicator = " 🔹" if calendar.get('primary') else ""
         calendar_list += f"{i}. {calendar['name']}{primary_indicator}\n"
 
-    return f'''📂 *Choose Calendar for Your Event:*
+    if user.language == 'he':
+        message = "📂 *בחר יומן עבור האירוע שלך:*\n\n"
+        message += f"📝 *{parsed_event['title']}*\n"
+        message += f"📅 {format_event_time(parsed_event, user.language)}\n\n"
+        message += "*יומנים זמינים:*\n"
+        message += calendar_list
+        message += "השב עם המספר (1, 2, 3...) כדי לבחור\n\n"
+        message += "_🔹 = יומן ראשי_"
+    else:
+        message = "📂 *Choose Calendar for Your Event:*\n\n"
+        message += f"📝 *{parsed_event['title']}*\n"
+        message += f"📅 {format_event_time(parsed_event, user.language)}\n\n"
+        message += "*Available Calendars:*\n"
+        message += calendar_list
+        message += "Reply with the number (1, 2, 3...) to select\n\n"
+        message += "_🔹 = Primary Calendar_"
 
-📝 *{parsed_event['title']}*
-📅 {format_event_time(parsed_event)}
-
-*Available Calendars:*
-{calendar_list}
-Reply with the number (1, 2, 3...) to select
-
-_🔹 = Primary Calendar_'''
+    return message
 
 def create_event_automatically(user, parsed_event, calendars):
     """Create event automatically with high confidence"""
@@ -408,14 +528,26 @@ def create_event_automatically(user, parsed_event, calendars):
             db.session.commit()
 
         if event_id:
-            return f'''🎉 *Event Created Successfully!*
+            location_text = parsed_event['location'] if parsed_event['location'] else (
+                'ללא מיקום' if user.language == 'he' else 'No location'
+            )
 
-📝 *{parsed_event['title']}*
-📅 {format_event_time(parsed_event)}
-📍 {parsed_event['location'] if parsed_event['location'] else 'No location'}
-📂 {calendar_name}
+            if user.language == 'he':
+                message = "🎉 *האירוע נוצר בהצלחה!*\n\n"
+                message += f"📝 *{parsed_event['title']}*\n"
+                message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+                message += f"📍 {location_text}\n"
+                message += f"📂 {calendar_name}\n\n"
+                message += f"✨ _נוצר אוטומטית ב{parsed_event['confidence']}% ביטחון_"
+            else:
+                message = "🎉 *Event Created Successfully!*\n\n"
+                message += f"📝 *{parsed_event['title']}*\n"
+                message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+                message += f"📍 {location_text}\n"
+                message += f"📂 {calendar_name}\n\n"
+                message += f"✨ _Created automatically with {parsed_event['confidence']}% confidence_"
 
-✨ _Created automatically with {parsed_event['confidence']}% confidence_'''
+            return message
         else:
             return "❌ Failed to create event. Please try again or check your permissions."
 
@@ -459,14 +591,26 @@ def create_event_from_confirmation(user, parsed_event):
             db.session.commit()
 
         if event_id:
-            return f'''🎉 *Event Created Successfully!*
+            location_text = parsed_event['location'] if parsed_event['location'] else (
+                'ללא מיקום' if user.language == 'he' else 'No location'
+            )
 
-📝 *{parsed_event['title']}*
-📅 {format_event_time(parsed_event)}
-📍 {parsed_event['location'] if parsed_event['location'] else 'No location'}
-📂 {calendar_name}
+            if user.language == 'he':
+                message = "🎉 *האירוע נוצר בהצלחה!*\n\n"
+                message += f"📝 *{parsed_event['title']}*\n"
+                message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+                message += f"📍 {location_text}\n"
+                message += f"📂 {calendar_name}\n\n"
+                message += f"Event ID: {event_id}"
+            else:
+                message = "🎉 *Event Created Successfully!*\n\n"
+                message += f"📝 *{parsed_event['title']}*\n"
+                message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+                message += f"📍 {location_text}\n"
+                message += f"📂 {calendar_name}\n\n"
+                message += f"Event ID: {event_id}"
 
-Event ID: {event_id}'''
+            return message
         else:
             return "❌ Failed to create event. Please try again or check your permissions."
 
@@ -495,14 +639,26 @@ def create_event_in_specific_calendar(user, parsed_event, selected_calendar):
             db.session.commit()
 
         if event_id:
-            return f'''🎉 *Event Created Successfully!*
+            location_text = parsed_event['location'] if parsed_event['location'] else (
+                'ללא מיקום' if user.language == 'he' else 'No location'
+            )
 
-📝 *{parsed_event['title']}*
-📅 {format_event_time(parsed_event)}
-📍 {parsed_event['location'] if parsed_event['location'] else 'No location'}
-📂 {selected_calendar['name']}
+            if user.language == 'he':
+                message = f"🎉 *האירוע נוצר ב{selected_calendar['name']}!*\n\n"
+                message += f"📝 *{parsed_event['title']}*\n"
+                message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+                message += f"📍 {location_text}\n"
+                message += f"📂 {selected_calendar['name']}\n\n"
+                message += f"Event ID: {event_id}"
+            else:
+                message = f"🎉 *Event Created in {selected_calendar['name']}!*\n\n"
+                message += f"📝 *{parsed_event['title']}*\n"
+                message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+                message += f"📍 {location_text}\n"
+                message += f"📂 {selected_calendar['name']}\n\n"
+                message += f"Event ID: {event_id}"
 
-Event ID: {event_id}'''
+            return message
         else:
             return "❌ Failed to create event. Please try again or check your permissions."
 
@@ -516,20 +672,32 @@ def ask_for_confirmation(user, parsed_event):
     serializable_event = make_json_serializable(parsed_event)
     user.set_conversation_state('confirm_event', {'parsed_event': serializable_event})
 
-    location_text = parsed_event['location'] if parsed_event['location'] else 'No location'
+    location_text = parsed_event['location'] if parsed_event['location'] else (
+        'ללא מיקום' if user.language == 'he' else 'No location'
+    )
 
-    return f'''🤔 *Let me confirm this event:*
+    if user.language == 'he':
+        message = "🤔 *בואו נוודא שהבנתי נכון:*\n\n"
+        message += f"📝 *{parsed_event['title']}*\n"
+        message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+        message += f"📍 {location_text}\n\n"
+        message += "האם זה נכון? השב:\n"
+        message += "• *כן* כדי ליצור\n"
+        message += "• *לא* כדי לבטל\n"
+        message += "• *עריכה* כדי לשנות\n\n"
+        message += f"_רמת ביטחון: {parsed_event['confidence']}%_"
+    else:
+        message = "🤔 *Let me confirm this event:*\n\n"
+        message += f"📝 *{parsed_event['title']}*\n"
+        message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+        message += f"📍 {location_text}\n\n"
+        message += "Is this correct? Reply:\n"
+        message += "• *yes* to create\n"
+        message += "• *no* to cancel\n"
+        message += "• *edit* to make changes\n\n"
+        message += f"_Confidence: {parsed_event['confidence']}%_"
 
-📝 *{parsed_event['title']}*
-📅 {format_event_time(parsed_event)}
-📍 {location_text}
-
-Is this correct? Reply:
-• *yes* to create
-• *no* to cancel
-• *edit* to make changes
-
-_Confidence: {parsed_event['confidence']}%_'''
+    return message
 
 def show_understanding_and_ask(user, parsed_event):
     """Show what we understood and ask for clarification"""
@@ -537,76 +705,54 @@ def show_understanding_and_ask(user, parsed_event):
     serializable_event = make_json_serializable(parsed_event)
     user.set_conversation_state('confirm_event', {'parsed_event': serializable_event})
 
-    location_text = parsed_event['location'] if parsed_event['location'] else 'No location'
+    location_text = parsed_event['location'] if parsed_event['location'] else (
+        'ללא מיקום' if user.language == 'he' else 'No location'
+    )
 
-    return f'''🤔 *I think I understand, but want to make sure:*
+    if user.language == 'he':
+        message = "🤔 *אני חושב שאני מבין, אבל רוצה לוודא:*\n\n"
+        message += f"📝 *{parsed_event['title']}*\n"
+        message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+        message += f"📍 {location_text}\n\n"
+        message += "האם הבנתי נכון? השב:\n"
+        message += "• *כן* כדי ליצור את האירוע הזה\n"
+        message += "• *לא* כדי לבטל\n"
+        message += "• *עריכה* כדי לשנות\n\n"
+        message += f"_רמת ביטחון: {parsed_event['confidence']}%_"
+    else:
+        message = "🤔 *I think I understand, but want to make sure:*\n\n"
+        message += f"📝 *{parsed_event['title']}*\n"
+        message += f"📅 {format_event_time(parsed_event, user.language)}\n"
+        message += f"📍 {location_text}\n\n"
+        message += "Did I get this right? Reply:\n"
+        message += "• *yes* to create this event\n"
+        message += "• *no* to cancel\n"
+        message += "• *edit* to make changes\n\n"
+        message += f"_Confidence: {parsed_event['confidence']}%_"
 
-📝 *{parsed_event['title']}*
-📅 {format_event_time(parsed_event)}
-📍 {location_text}
+    return message
 
-Did I get this right? Reply:
-• *yes* to create this event
-• *no* to cancel
-• *edit* to make changes
-
-_Confidence: {parsed_event['confidence']}%_'''
-
-def format_event_time(parsed_event):
-    """Format event time for display"""
-    start_time = parsed_event['start_time']
-    end_time = parsed_event['end_time']
-
-    if isinstance(start_time, str):
-        start_time = datetime.fromisoformat(start_time)
-    if isinstance(end_time, str):
-        end_time = datetime.fromisoformat(end_time)
-
-    return f"{start_time.strftime('%A, %B %d, %Y')} at {start_time.strftime('%I:%M %p')} - {end_time.strftime('%I:%M %p')}"
-
-def get_help_message():
+def get_help_message(user):
     """Get comprehensive help message"""
-    return '''🤖 *Smart Calendar Bot Help*
-
-*📝 Create Events Naturally:*
-Just tell me what you want to schedule:
-• "Meeting with John tomorrow at 2pm"
-• "Doctor appointment Friday 10am in clinic"
-• "Lunch with Sarah next Monday 12:30pm"
-• "Team standup daily at 9am room A"
-
-*📅 View Events:*
-• *today* - Get today's events
-• *upcoming* - Get this week's events
-
-*⚙️ Setup:*
-• *connect* - Link your Google Calendar
-• *status* - Check connection status
-
-*💡 Tips:*
-• I understand natural language!
-• Include time, date, and who you're meeting
-• Add location for better organization
-• I'll ask for confirmation if unsure
-
-Try saying "Meeting with John tomorrow at 2pm" to see the magic! ✨'''
+    return get_message_in_language(user.language, 'help')
 
 def handle_connect_command(phone_number):
     """Handle connect command"""
+    user = User.query.filter_by(whatsapp_number=phone_number).first()
+    if not user:
+        user = User(whatsapp_number=phone_number)
+        db.session.add(user)
+        db.session.commit()
+
     auth_url = f"https://41bf4e1c7513.ngrok-free.app/auth/login/{phone_number}"
-    return f'''🔗 *Connect Your Google Calendar*
-
-Click this link to authorize calendar access:
-{auth_url}
-
-After clicking, you'll be redirected to Google to sign in and grant permissions.'''
+    return get_message_in_language(user.language, 'connect_prompt', auth_url=auth_url)
 
 def handle_today_command(phone_number):
     """Handle today command"""
     user = User.query.filter_by(whatsapp_number=phone_number).first()
 
     if not user or not user.google_access_token:
-        return "❌ Please connect your Google Calendar first. Send 'connect' to get started."
+        return get_message_in_language(user.language if user else 'en', 'not_connected')
 
     calendar_service = GoogleCalendarService()
     events, updated_credentials = calendar_service.get_today_events(
@@ -627,7 +773,7 @@ def handle_upcoming_command(phone_number):
     user = User.query.filter_by(whatsapp_number=phone_number).first()
 
     if not user or not user.google_access_token:
-        return "❌ Please connect your Google Calendar first. Send 'connect' to get started."
+        return get_message_in_language(user.language if user else 'en', 'not_connected')
 
     calendar_service = GoogleCalendarService()
     events_by_date, updated_credentials = calendar_service.get_upcoming_events(
@@ -649,12 +795,20 @@ def check_user_status(phone_number):
     user = User.query.filter_by(whatsapp_number=phone_number).first()
 
     if not user:
-        return "❌ Not registered. Send 'connect' to get started."
+        return get_message_in_language('en', 'not_connected')
 
     if not user.google_access_token:
-        return "❌ Google Calendar not connected. Send 'connect' to link your calendar."
+        return get_message_in_language(user.language, 'not_connected')
 
-    return f"✅ Connected to Google Calendar\n📍 Timezone: {user.timezone}\n📅 Ready to fetch events and create new ones with AI!"
+    return get_message_in_language(user.language, 'connection_success', timezone=user.timezone)
+
+def handle_cancel_command(user):
+    """Handle cancel command to clear conversation state"""
+    if user.conversation_step:
+        user.clear_conversation_state()
+        return get_message_in_language(user.language, 'cancel_with_conversation')
+    else:
+        return get_message_in_language(user.language, 'cancel_without_conversation')
 
 def process_message(phone_number, message_text):
     """Process incoming message and return response"""
@@ -665,8 +819,15 @@ def process_message(phone_number, message_text):
     user = User.query.filter_by(whatsapp_number=phone_number).first()
     if not user:
         user = User(whatsapp_number=phone_number)
+        user.language = 'auto'  # Set default language
         db.session.add(user)
         db.session.commit()
+
+    # Detect and set user language
+    if message_text:
+        detect_user_language(user, message_text)
+
+    print(f"🌍 User language: {user.language}")
 
     # Clean message text
     message_lower = message_text.lower().strip()
@@ -678,16 +839,38 @@ def process_message(phone_number, message_text):
         if conversation_result:
             return conversation_result
 
-    # Handle exact command matches
+    # Handle language switching commands
+    if message_lower in ['עבור לאנגלית', 'switch to english']:
+        user.language = 'en'
+        db.session.commit()
+        return get_message_in_language('en', 'language_switched')
+
+    elif message_lower in ['עבור לעברית', 'switch to hebrew']:
+        user.language = 'he'
+        db.session.commit()
+        return get_message_in_language('he', 'language_switched')
+
+    # Handle exact command matches (both languages)
     exact_commands = {
+        # English commands
         'today': lambda: handle_today_command(phone_number),
         'upcoming': lambda: handle_upcoming_command(phone_number),
         'connect': lambda: handle_connect_command(phone_number),
         'status': lambda: check_user_status(phone_number),
-        'hello': lambda: "Hello! I'm your smart WhatsApp Calendar Bot. Try saying things like: 'Meeting with John tomorrow at 2pm', 'Doctor appointment Friday 10am', 'today' to see today's events, 'help' for more commands",
-        'help': lambda: get_help_message(),
-        'add': lambda: "📝 Just tell me about your event naturally! Try saying: 'Meeting with John tomorrow at 2pm', 'Doctor appointment Friday 10am', 'Lunch with Sarah next Monday 12:30pm'",
-        'cancel': lambda: handle_cancel_command(user)
+        'hello': lambda: get_message_in_language(user.language, 'welcome'),
+        'help': lambda: get_help_message(user),
+        'add': lambda: get_message_in_language(user.language, 'nlp_failed'),
+        'cancel': lambda: handle_cancel_command(user),
+
+        # Hebrew commands
+        'היום': lambda: handle_today_command(phone_number),
+        'קרוב': lambda: handle_upcoming_command(phone_number),
+        'התחבר': lambda: handle_connect_command(phone_number),
+        'סטטוס': lambda: check_user_status(phone_number),
+        'שלום': lambda: get_message_in_language(user.language, 'welcome'),
+        'עזרה': lambda: get_help_message(user),
+        'הוסף': lambda: get_message_in_language(user.language, 'nlp_failed'),
+        'בטל': lambda: handle_cancel_command(user)
     }
 
     if message_lower in exact_commands:
@@ -700,10 +883,10 @@ def process_message(phone_number, message_text):
         # Only suggest NLP for event-like messages
         if should_try_nlp(message_text):
             print("🔥 SHOULD TRY NLP - NOT CONNECTED")
-            return "❌ Please connect your Google Calendar first to create events. Send 'connect' to get started, then you can say things like: 'Meeting with John tomorrow at 2pm'"
+            return get_message_in_language(user.language, 'not_connected')
         else:
             print("🔥 SHOULD NOT TRY NLP")
-            return f"Unknown command: '{message_text}'\nType 'help' for available commands."
+            return get_message_in_language(user.language, 'unknown_command', message=message_text)
 
     print("🔥 USER IS CONNECTED")
 
@@ -715,19 +898,11 @@ def process_message(phone_number, message_text):
         if nlp_result:
             return nlp_result
         else:
-            return "🤔 I couldn't parse that as an event. Try formats like: 'Meeting with John tomorrow at 2pm', 'Doctor appointment Friday 10am', 'Lunch with Sarah next Monday 12:30pm'. Or use commands like 'today', 'upcoming', or 'help'"
+            return get_message_in_language(user.language, 'nlp_failed')
 
     print("🔥 NOT TRYING NLP")
     # Fallback for non-event messages
-    return f"Unknown command: '{message_text}'\nType 'help' for available commands."
-
-def handle_cancel_command(user):
-    """Handle cancel command to clear conversation state"""
-    if user.conversation_step:
-        user.clear_conversation_state()
-        return "❌ Cancelled current conversation. You can start fresh anytime!"
-    else:
-        return "Nothing to cancel. You can create events by saying something like: 'Meeting with John tomorrow at 2pm'"
+    return get_message_in_language(user.language, 'unknown_command', message=message_text)
 
 # NOW create_app() function
 def create_app():
@@ -740,7 +915,7 @@ def create_app():
 
     @app.route('/')
     def index():
-        return "WhatsApp Calendar Bot with Conversation State is running!"
+        return "WhatsApp Calendar Bot with Bilingual Support is running!"
 
     @app.route('/test')
     def test_route():
@@ -819,6 +994,47 @@ def create_app():
     def auth_callback():
         """Handle Google OAuth callback"""
         try:
+            # Check if user denied access
+            error = request.args.get('error')
+            if error == 'access_denied':
+                phone_number = request.args.get('state')
+                user = User.query.filter_by(whatsapp_number=phone_number).first()
+
+                if user and user.language == 'he':
+                    return '''
+                    <html>
+                    <body style="font-family: Arial; text-align: right; direction: rtl;">
+                        <h1>❌ גישה נדחתה</h1>
+                        <p>אתה צריך לאשר הרשאות יומן כדי שהבוט יעבוד.</p>
+                        <p>כדי לנסות שוב, שלח 'התחבר' לבוט הוואטסאפ.</p>
+                        <br>
+                        <p><strong>למה אנחנו צריכים הרשאות:</strong></p>
+                        <ul>
+                            <li>📅 קריאת אירועי היומן שלך</li>
+                            <li>➕ יצירת אירועים שאתה מבקש</li>
+                            <li>🔒 אנחנו לעולם לא משנים או מוחקים אירועים קיימים</li>
+                        </ul>
+                    </body>
+                    </html>
+                    '''
+                else:
+                    return '''
+                    <html>
+                    <body>
+                        <h1>❌ Access Denied</h1>
+                        <p>You need to grant calendar permissions for the bot to work.</p>
+                        <p>To try again, send 'connect' to the WhatsApp bot.</p>
+                        <br>
+                        <p><strong>Why we need permissions:</strong></p>
+                        <ul>
+                            <li>📅 Read your calendar events</li>
+                            <li>➕ Create events you request</li>
+                            <li>🔒 We never modify or delete existing events</li>
+                        </ul>
+                    </body>
+                    </html>
+                    '''
+
             code = request.args.get('code')
             state = request.args.get('state')
 
@@ -836,6 +1052,7 @@ def create_app():
             user = User.query.filter_by(whatsapp_number=phone_number).first()
             if not user:
                 user = User(whatsapp_number=phone_number)
+                user.language = 'auto'
                 db.session.add(user)
 
             user.google_access_token = tokens['access_token']
@@ -844,17 +1061,30 @@ def create_app():
             user.timezone = 'Asia/Jerusalem'
             db.session.commit()
 
-            return f"""
-            <html>
-            <body>
-                <h1>✅ Calendar Connected Successfully!</h1>
-                <p>Your WhatsApp number <strong>{phone_number}</strong> is now connected to Google Calendar.</p>
-                <p>Timezone set to: <strong>Asia/Jerusalem</strong></p>
-                <p>You can now use calendar commands and create events naturally!</p>
-                <p>Try saying: <strong>"Meeting with John tomorrow at 2pm"</strong></p>
-            </body>
-            </html>
-            """
+            if user.language == 'he':
+                return '''
+                <html>
+                <body style="font-family: Arial; text-align: right; direction: rtl;">
+                    <h1>✅ היומן חובר בהצלחה!</h1>
+                    <p>הוואטסאפ שלך מחובר עכשיו ליומן הגוגל.</p>
+                    <p>אזור זמן נקבע ל: <strong>Asia/Jerusalem</strong></p>
+                    <p>עכשיו אתה יכול להשתמש בפקודות יומן וליצור אירועים באופן טבעי!</p>
+                    <p>נסה לומר: <strong>"פגישה עם יונתן מחר בשעה 14:00"</strong></p>
+                </body>
+                </html>
+                '''
+            else:
+                return f'''
+                <html>
+                <body>
+                    <h1>✅ Calendar Connected Successfully!</h1>
+                    <p>Your WhatsApp number <strong>{phone_number}</strong> is now connected to Google Calendar.</p>
+                    <p>Timezone set to: <strong>Asia/Jerusalem</strong></p>
+                    <p>You can now use calendar commands and create events naturally!</p>
+                    <p>Try saying: <strong>"Meeting with John tomorrow at 2pm"</strong></p>
+                </body>
+                </html>
+                '''
 
         except Exception as e:
             print(f"OAuth callback error: {e}")
@@ -898,70 +1128,6 @@ def create_app():
             return f"❌ Failed to send message to {phone_number}"
 
     # Debug routes for conversation state
-    @app.route('/debug/event-creation/<path:phone_number>')
-    def debug_event_creation(phone_number):
-        """Debug event creation"""
-        phone_number = phone_number.replace('%2B', '+')
-        user = User.query.filter_by(whatsapp_number=phone_number).first()
-
-        if not user or not user.google_access_token:
-            return "User not connected to Google Calendar"
-
-        # Test event creation
-        test_event = {
-            'title': 'Test Event',
-            'start_time': datetime.now(),
-            'end_time': datetime.now() + timedelta(hours=1),
-            'location': 'Test Location'
-        }
-
-        try:
-            calendar_service = GoogleCalendarService()
-            event_id, updated_credentials = calendar_service.create_event_in_calendar(
-                user.get_credentials(),
-                test_event,
-                'primary',
-                user.timezone
-            )
-
-            if event_id:
-                return f"✅ Test event created successfully! ID: {event_id}"
-            else:
-                return "❌ Event creation returned None"
-
-        except Exception as e:
-            return f"❌ Event creation error: {str(e)}"
-
-    @app.route('/debug/calendars/<path:phone_number>')
-    def debug_calendars(phone_number):
-        """Debug user's calendars"""
-        phone_number = phone_number.replace('%2B', '+')
-        user = User.query.filter_by(whatsapp_number=phone_number).first()
-
-        if not user or not user.google_access_token:
-            return "User not connected"
-
-        try:
-            calendar_service = GoogleCalendarService()
-            calendars, _ = calendar_service.get_user_calendars(user.get_credentials())
-
-            result = f"Total calendars: {len(calendars)}\n\n"
-
-            for i, cal in enumerate(calendars, 1):
-                result += f"{i}. {cal['name']}\n"
-                result += f"   ID: {cal['id']}\n"
-                result += f"   Primary: {cal.get('primary', False)}\n"
-                result += f"   Access: {cal['access_role']}\n"
-                result += f"   Writable: {cal['access_role'] in ['owner', 'writer']}\n\n"
-
-            writable_calendars = [cal for cal in calendars if cal['access_role'] in ['owner', 'writer']]
-            result += f"Writable calendars: {len(writable_calendars)}\n"
-
-            return f"<pre>{result}</pre>"
-
-        except Exception as e:
-            return f"Error: {str(e)}"
-
     @app.route('/debug/conversation/<path:phone_number>')
     def debug_conversation(phone_number):
         """Debug conversation state for a user"""
@@ -973,6 +1139,7 @@ def create_app():
 
         return {
             'phone_number': user.whatsapp_number,
+            'language': user.language,
             'conversation_step': user.conversation_step,
             'conversation_state': user.get_conversation_state(),
             'conversation_updated': user.conversation_updated.isoformat() if user.conversation_updated else None,
