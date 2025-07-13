@@ -1,0 +1,106 @@
+services:
+  # Main Flask Web Application
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    depends_on:
+      - redis
+      - postgres
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=development
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://calendar_user:calendar_pass@postgres:5432/calendar_bot
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: python main.py
+    restart: unless-stopped
+
+  # Celery Worker - Processes background tasks
+  worker:
+    build: .
+    depends_on:
+      - redis
+      - postgres
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://calendar_user:calendar_pass@postgres:5432/calendar_bot
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=4 -Q celery,reminders
+    restart: unless-stopped
+
+  # Celery Beat - Scheduler for periodic tasks
+  beat:
+    build: .
+    depends_on:
+      - redis
+      - postgres
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://calendar_user:calendar_pass@postgres:5432/calendar_bot
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: celery -A app.celery_app beat --loglevel=info
+    restart: unless-stopped
+
+  # Redis - Message broker and result backend
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # PostgreSQL - Production database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=calendar_bot
+      - POSTGRES_USER=calendar_user
+      - POSTGRES_PASSWORD=calendar_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Flower - Celery monitoring dashboard
+  flower:
+    build: .
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: celery -A app.celery_app flower --port=5555
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:
