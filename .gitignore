@@ -1,0 +1,18 @@
+# Environment variables with secrets
+.env
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Database files
+instance/
+
+# Celery task queue runtime files
+celerybeat-schedule
+
+# Logs
+logs/
+
+# IDE specific files
+.idea/

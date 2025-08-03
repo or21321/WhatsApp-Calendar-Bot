@@ -2,10 +2,12 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from datetime import datetime, timedelta
 import pytz
 import os
 from app.config import Config
+from app.services.logger import calendar_logger as logger
 
 class GoogleCalendarService:
     def __init__(self):
@@ -70,21 +72,43 @@ class GoogleCalendarService:
 
     def build_service(self, credentials_dict):
         """Build Google Calendar service from credentials"""
-        credentials = Credentials(
-            token=credentials_dict['access_token'],
-            refresh_token=credentials_dict['refresh_token'],
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=self.client_id,
-            client_secret=self.client_secret,
-            scopes=self.SCOPES  # Add this line
-        )
+        try:
+            credentials = Credentials(
+                token=credentials_dict['access_token'],
+                refresh_token=credentials_dict['refresh_token'],
+                token_uri='https://oauth2.googleapis.com/token',
+                client_id=self.client_id,
+                client_secret=self.client_secret,
+                scopes=self.SCOPES
+            )
 
-        # Refresh token if needed
-        if credentials.expired:
-            credentials.refresh(Request())
+            # Refresh token if needed
+            if credentials.expired:
+                print("Token expired, attempting refresh")
+                try:
+                    credentials.refresh(Request())
+                    print("✅ Token refreshed successfully")
+                    logger.info("Token refreshed successfully")
+                except Exception as e:
+                    print(f"❌ Error refreshing token: {e}")
+                    logger.error("Failed to refresh token", e, {
+                        "token_expiry": credentials_dict.get('token_expiry'),
+                    })
+                    # If refresh fails but we still have a valid access token, try to proceed
+                    if not credentials.valid:
+                        raise
 
-        service = build('calendar', 'v3', credentials=credentials)
-        return service, credentials
+            service = build('calendar', 'v3', credentials=credentials, cache_discovery=False)
+            return service, credentials
+            
+        except KeyError as e:
+            print(f"❌ Missing credential: {e}")
+            logger.error("Missing credential", e)
+            return None, None
+        except Exception as e:
+            print(f"❌ Error building service: {e}")
+            logger.error("Error building calendar service", e)
+            return None, None
 
     def get_user_calendars(self, credentials_dict):
         """Get list of user's calendars with write access"""

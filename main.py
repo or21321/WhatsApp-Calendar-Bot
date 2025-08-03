@@ -9,6 +9,10 @@ from datetime import datetime, timedelta, timezone
 import os
 import json
 import re
+from app.services.logger import get_logger
+
+# Initialize logger for main module
+logger = get_logger(__name__)
 
 
 def detect_user_language(user, message_text):
@@ -394,7 +398,9 @@ def try_nlp_event_creation(user, message_text):
             return None
 
     except Exception as e:
-        print(f"NLP parsing error: {e}")
+        error_msg = f"NLP parsing error: {e}"
+        print(error_msg)
+        logger.error("NLP parsing failed", e, {"phone": phone_number})
         return None
 
 
@@ -444,19 +450,26 @@ def create_event_automatically(user, parsed_event, calendars):
             else:
                 calendar_id = calendars[0]['id']
                 calendar_name = calendars[0]['name']
+                
+        # Use a database transaction to ensure all related operations succeed or fail together
+        try:
+            event_id, updated_credentials = calendar_service.create_event_in_calendar(
+                user.get_credentials(),
+                parsed_event,
+                calendar_id,
+                user.timezone
+            )
 
-        event_id, updated_credentials = calendar_service.create_event_in_calendar(
-            user.get_credentials(),
-            parsed_event,
-            calendar_id,
-            user.timezone
-        )
-
-        if updated_credentials:
-            user.google_access_token = updated_credentials.token
-            if updated_credentials.expiry:
-                user.token_expiry = updated_credentials.expiry
-            db.session.commit()
+            if updated_credentials:
+                user.google_access_token = updated_credentials.token
+                if updated_credentials.expiry:
+                    user.token_expiry = updated_credentials.expiry
+                db.session.commit()
+        except Exception as transaction_error:
+            # Roll back the transaction if any part fails
+            logger.error("Failed to create event transaction", transaction_error)
+            db.session.rollback()
+            raise transaction_error
 
         if event_id:
             location_text = parsed_event['location'] if parsed_event['location'] else (
@@ -609,6 +622,7 @@ def create_event_from_confirmation(user, parsed_event):
 def create_event_in_specific_calendar(user, parsed_event, selected_calendar):
     """Create event in user-selected calendar"""
     try:
+        logger.info("Creating event in specific calendar", {"user_id": user.id, "calendar": selected_calendar.get('name', 'unknown')})
         calendar_service = GoogleCalendarService()
 
         event_id, updated_credentials = calendar_service.create_event_in_calendar(
@@ -675,7 +689,9 @@ def create_event_in_specific_calendar(user, parsed_event, selected_calendar):
                 return "❌ Failed to create event. Check calendar connection and permissions.\n\nSend 'status' to check."
 
     except Exception as e:
-        print(f"Error creating event in specific calendar: {e}")
+        error_msg = f"Error creating event in specific calendar: {e}"
+        print(error_msg)
+        logger.error("Creating event in specific calendar failed", e, {"user_id": user.id, "calendar": selected_calendar.get('id', 'unknown')})
         if user.language == 'he':
             return "❌ שגיאה ביצירת האירוע. אנא נסה שוב."
         else:
@@ -993,6 +1009,7 @@ def handle_view_reminders_command(phone_number):
 def process_message(phone_number, message_text):
     """Process incoming message and return response"""
     print(f"Processing: {message_text} from {phone_number}")
+    logger.info(f"Processing message", {"phone": phone_number, "message_length": len(message_text) if message_text else 0})
 
     user = User.query.filter_by(whatsapp_number=phone_number).first()
     if not user:
@@ -1103,7 +1120,7 @@ def create_app():
 
             print(f"Webhook verification - Token: {verify_token}, Challenge: {challenge}")
 
-            if verify_token == 'my_secret_verify_token_123':
+            if verify_token == Config.WEBHOOK_VERIFY_TOKEN:
                 print("Webhook verified successfully!")
                 return challenge
             else:

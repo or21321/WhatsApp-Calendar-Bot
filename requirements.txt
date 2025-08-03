@@ -1,0 +1,41 @@
+# Core Flask and Web Framework
+Flask==3.0.0
+Flask-Migrate==4.0.5
+
+# Database
+SQLAlchemy==2.0.23
+Flask-SQLAlchemy==3.1.1
+
+# Google APIs
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-api-python-client==2.108.0
+
+# HTTP Requests
+requests==2.31.0
+
+# Date/Time Processing
+python-dateutil==2.8.2
+pytz==2023.3
+dateparser==1.1.8
+
+# Natural Language Processing
+spacy==3.7.2
+# We'll download the model in Docker
+
+# Task Queue System (NEW)
+celery==5.3.4
+redis==5.0.1
+flower==2.0.1
+
+# Production Server
+gunicorn==21.2.0
+
+# Database Drivers
+psycopg2-binary==2.9.7
+
+# Environment Configuration
+python-dotenv==1.0.0
+
+# Additional utilities
+Werkzeug==3.0.1
