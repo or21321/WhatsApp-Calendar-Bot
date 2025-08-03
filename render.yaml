@@ -42,7 +42,9 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=2 -Q celery,reminders
+    plan: starter
+    buildCommand: ""
+    startCommand: celery -A app.celery_app worker --loglevel=info --concurrency=2 -Q celery,reminders
     envVars:
       - key: FLASK_ENV
         value: production
@@ -62,7 +64,9 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    command: celery -A app.celery_app beat --loglevel=info
+    plan: starter
+    buildCommand: ""
+    startCommand: celery -A app.celery_app beat --loglevel=info
     envVars:
       - key: FLASK_ENV
         value: production
