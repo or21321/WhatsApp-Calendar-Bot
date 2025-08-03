@@ -1,0 +1,91 @@
+services:
+  # Main Flask Web Application
+  - type: web
+    name: whatsapp-calendar-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: calendar-bot-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: calendar-bot-redis
+          property: connectionString
+      - key: BASE_URL
+        value: https://whatsapp-calendar-bot.onrender.com
+      - key: GOOGLE_REDIRECT_URI
+        value: https://whatsapp-calendar-bot.onrender.com/auth/callback
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: WHATSAPP_SYSTEM_TOKEN
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WEBHOOK_VERIFY_TOKEN
+        generateValue: true
+
+  # Celery Worker
+  - type: worker
+    name: celery-worker
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2 -Q celery,reminders
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: calendar-bot-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: calendar-bot-redis
+          property: connectionString
+
+  # Celery Beat (Scheduler)
+  - type: worker
+    name: celery-beat
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    command: celery -A app.celery_app beat --loglevel=info
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: calendar-bot-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: calendar-bot-redis
+          property: connectionString
+
+  # Redis instance
+  - type: redis
+    name: calendar-bot-redis
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: Allow all traffic
+
+# Database
+databases:
+  - name: calendar-bot-db
+    databaseName: calendar_bot
+    user: calendar_user
+    plan: free

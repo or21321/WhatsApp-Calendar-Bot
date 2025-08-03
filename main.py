@@ -450,7 +450,7 @@ def create_event_automatically(user, parsed_event, calendars):
             else:
                 calendar_id = calendars[0]['id']
                 calendar_name = calendars[0]['name']
-                
+
         # Use a database transaction to ensure all related operations succeed or fail together
         try:
             event_id, updated_credentials = calendar_service.create_event_in_calendar(
@@ -1120,7 +1120,7 @@ def create_app():
 
             print(f"Webhook verification - Token: {verify_token}, Challenge: {challenge}")
 
-            if verify_token == Config.WEBHOOK_VERIFY_TOKEN:
+            if verify_token == Config.SECRET_KEY:
                 print("Webhook verified successfully!")
                 return challenge
             else:
